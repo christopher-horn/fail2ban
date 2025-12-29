@@ -1,0 +1,93 @@
+
+AIX INSTALLATION NOTES
+
+Note that as of the time of this writing the aix-ipsec.conf action
+module did not include ipv6 support. This was also done on a pretty
+current AIX 7.3 system.  Older AIX 7.3 and older AIX 7.2 releases
+were not tested. 
+
+INSTALLATION
+
+Installation out of the box is fairly straight forward:
+
+python3 setup.py install
+
+Note that the installation does not install under the /opt/freeware
+directory tree following the AIX Linux Toolbox conventions. Instead
+it will install into /usr/opt/python3 with the configuration files
+found in the expected /etc/fail2ban location.
+
+CONFIGURATION
+
+The default AIX syslog daemon by default includes the facility:priority
+information in the syslog string and the existing fail2ban filters do not
+handle it at the moment. The syslogd service can be updated to add the -N
+option on startup to normalize the log output as follows:
+
+chssys -s syslogd -a "-N"
+
+If you do not already have syslog configured, you can add an entry like
+the following to your /etc/syslog.conf configuration file:
+
+auth.verbose /var/log/secure rotate size 4m files 8 compress
+
+Then touch the file to create it:
+
+touch /var/log/secure
+
+And then stop and restart the service to load the new configuration.
+
+stopsrc -s syslogd
+startsrc -s syslogd
+
+The SSH service should be updated to use VERBOSE logging or higher if it
+is not already.
+
+The fail2ban-server can be registered and managed with the system resource
+controller using the signals communication option as follows:
+
+mkssys -s fail2ban -G hids -p /usr/opt/python3/bin/fail2ban-server -a "-f" -u 0 -S -n 15 -f 9
+
+And then added to the inittab to start on boot:
+
+mkitab -i rctcpip "fail2ban:2:wait:/usr/sbin/startsrc -s fail2ban >/dev/console 2>&1"
+
+Setup a /etc/fail2ban/jail.local configuration file with any changes you want.
+A minimal configuration with more aggressive ban times might be something as
+follows:
+
+[DEFAULT]
+backend = polling
+bantime  = 7d
+findtime = 240m
+maxretry = 5
+
+Setup the jail configuration files that you would like to use. I only tested the
+SSH jail as that was all I needed.  The /etc/fail2ban/jail.d/jail-sshd.conf should
+have contents as follows:
+
+[sshd]
+enabled = true
+logpath = /var/log/secure
+backend = polling
+action = aix-ipsec[]
+mode = extra
+
+Note you do need to use the polling back end. You should set logpath to the
+syslog file you are routing SSH log data to.
+
+For the action you can pass in some arguments in the []. The defaults in
+the handler are presently:
+
+block=all,log=N,logging=N
+
+The log=Y option enables the log flag on each ban entry added.
+
+The logging=Y entry will run mkfilt -g start to enable logging when the daemon
+starts up. Note if you have not enabled or configured the ipsec service then
+the ipv4 tables will be enabled on start with permit all policy. 
+
+Note all rules added by the fail2ban service will have their description set
+to fail2ban, and when the daemon is shutdown any rules with fail2ban in their
+description should be flushed.
+
